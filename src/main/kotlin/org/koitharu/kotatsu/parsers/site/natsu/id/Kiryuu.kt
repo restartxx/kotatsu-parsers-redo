@@ -23,99 +23,57 @@ internal class Kiryuu(context: MangaLoaderContext) :
         mangaId: String,
         mangaAbsoluteUrl: String,
     ): List<MangaChapter> {
-        // Use WebView to load the page and extract chapter data from the DOM
+        // Use WebView with polling-based script to extract chapter data
         val pageScript = """
-            new Promise((resolveMain, rejectMain) => {
-                (async function() {
-                    try {
-                        console.log('[Kiryuu] Starting chapter loading...');
+            (() => {
+                // Check if we need to click the chapters tab first
+                const tabButton = document.querySelector('button[data-key="chapters"]');
+                if (tabButton && !window.__kiryuuTabClicked) {
+                    console.log('[Kiryuu] Found chapters tab button, clicking...');
+                    tabButton.click();
+                    window.__kiryuuTabClicked = true;
+                    return null; // Keep polling
+                }
 
-                        // Helper function to wait for element
-                        function waitForElement(selector, timeout = 10000) {
-                            return new Promise((resolve, reject) => {
-                                if (document.querySelector(selector)) {
-                                    return resolve(document.querySelector(selector));
-                                }
+                // Check if chapter list has loaded
+                const chapterElements = document.querySelectorAll('div#chapter-list > div[data-chapter-number]');
+                if (chapterElements.length === 0) {
+                    console.log('[Kiryuu] Waiting for chapters to load...');
+                    return null; // Keep polling
+                }
 
-                                const observer = new MutationObserver(() => {
-                                    if (document.querySelector(selector)) {
-                                        observer.disconnect();
-                                        resolve(document.querySelector(selector));
-                                    }
-                                });
+                // Extract chapter data from DOM
+                console.log('[Kiryuu] Chapter list loaded with ' + chapterElements.length + ' chapters');
+                const chapters = [];
 
-                                observer.observe(document.body, {
-                                    childList: true,
-                                    subtree: true
-                                });
+                chapterElements.forEach(element => {
+                    const a = element.querySelector('a');
+                    if (!a) return;
 
-                                setTimeout(() => {
-                                    observer.disconnect();
-                                    reject(new Error('Timeout waiting for ' + selector));
-                                }, timeout);
-                            });
-                        }
+                    const href = a.getAttribute('href');
+                    if (!href) return;
 
-                        // Wait for and click the chapters tab
-                        try {
-                            const tabButton = await waitForElement('button[data-key="chapters"]');
-                            console.log('[Kiryuu] Found chapters tab button, clicking...');
-                            tabButton.click();
+                    const titleSpan = element.querySelector('div.font-medium span');
+                    const title = titleSpan ? titleSpan.textContent.trim() : '';
 
-                            // Wait for chapter list to load
-                            await waitForElement('div#chapter-list > div[data-chapter-number]');
-                            console.log('[Kiryuu] Chapter list loaded');
+                    const timeElement = element.querySelector('time');
+                    const dateText = timeElement ? timeElement.textContent.trim() : null;
+                    const dateTime = timeElement ? timeElement.getAttribute('datetime') : null;
 
-                            // Small delay to ensure all chapters are rendered
-                            await new Promise(resolve => setTimeout(resolve, 500));
+                    const chapterNumber = element.getAttribute('data-chapter-number');
 
-                        } catch (error) {
-                            console.log('[Kiryuu] Error:', error);
-                            // Try direct htmx trigger as fallback
-                            const chapterList = document.querySelector('#chapter-list');
-                            if (chapterList && typeof htmx !== 'undefined') {
-                                htmx.trigger(chapterList, 'getChapterList');
-                                await waitForElement('div#chapter-list > div[data-chapter-number]');
-                            }
-                        }
+                    chapters.push({
+                        url: href,
+                        title: title,
+                        number: chapterNumber,
+                        dateText: dateText,
+                        dateTime: dateTime
+                    });
+                });
 
-                        // Extract chapter data from DOM
-                        const chapters = [];
-                        const chapterElements = document.querySelectorAll('div#chapter-list > div[data-chapter-number]');
-
-                        chapterElements.forEach(element => {
-                            const a = element.querySelector('a');
-                            if (!a) return;
-
-                            const href = a.getAttribute('href');
-                            if (!href) return;
-
-                            const titleSpan = element.querySelector('div.font-medium span');
-                            const title = titleSpan ? titleSpan.textContent.trim() : '';
-
-                            const timeElement = element.querySelector('time');
-                            const dateText = timeElement ? timeElement.textContent.trim() : null;
-                            const dateTime = timeElement ? timeElement.getAttribute('datetime') : null;
-
-                            const chapterNumber = element.getAttribute('data-chapter-number');
-
-                            chapters.push({
-                                url: href,
-                                title: title,
-                                number: chapterNumber,
-                                dateText: dateText,
-                                dateTime: dateTime
-                            });
-                        });
-
-                        console.log('[Kiryuu] Extracted ' + chapters.length + ' chapters');
-                        resolveMain(JSON.stringify(chapters));
-                    } catch (error) {
-                        console.log('[Kiryuu] Error in main function:', error);
-                        rejectMain(error);
-                    }
-                })();
-            });
+                console.log('[Kiryuu] Extracted ' + chapters.length + ' chapters');
+                return JSON.stringify(chapters);
+            })();
         """.trimIndent()
 
         val html = context.evaluateJs(mangaAbsoluteUrl, pageScript, timeout = 30000L)
