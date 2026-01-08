@@ -26,19 +26,34 @@ internal class Kiryuu(context: MangaLoaderContext) :
         // Use WebView with polling-based script to extract chapter data
         val pageScript = """
             (() => {
+                // Initialize retry counter
+                if (typeof window.__kiryuuRetryCount === 'undefined') {
+                    window.__kiryuuRetryCount = 0;
+                }
+
                 // Check if we need to click the chapters tab first
                 const tabButton = document.querySelector('button[data-key="chapters"]');
                 if (tabButton && !window.__kiryuuTabClicked) {
                     console.log('[Kiryuu] Found chapters tab button, clicking...');
                     tabButton.click();
                     window.__kiryuuTabClicked = true;
+                    window.__kiryuuRetryCount = 0;
                     return null; // Keep polling
                 }
 
                 // Check if chapter list has loaded
                 const chapterElements = document.querySelectorAll('div#chapter-list > div[data-chapter-number]');
                 if (chapterElements.length === 0) {
-                    console.log('[Kiryuu] Waiting for chapters to load...');
+                    window.__kiryuuRetryCount++;
+                    console.log('[Kiryuu] Waiting for chapters to load... (attempt ' + window.__kiryuuRetryCount + ')');
+
+                    // If we've waited for 5 polls (about 5 seconds) without chapters loading, try clicking again
+                    if (window.__kiryuuRetryCount >= 5 && tabButton) {
+                        console.log('[Kiryuu] Chapters not loading, clicking button again...');
+                        tabButton.click();
+                        window.__kiryuuRetryCount = 0;
+                    }
+
                     return null; // Keep polling
                 }
 
