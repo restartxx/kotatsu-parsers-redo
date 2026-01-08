@@ -91,10 +91,10 @@ internal class Kiryuu(context: MangaLoaderContext) :
             )
 
             if (interceptedRequests.isNotEmpty()) {
-                // Process the first page from WebView interception
-                val firstPageResponse = interceptedRequests.first().body
-                if (!firstPageResponse.isNullOrEmpty()) {
-                    val doc = Jsoup.parse(firstPageResponse)
+                // Use the intercepted response body directly - it contains all chapters
+                val responseBody = interceptedRequests.first().body
+                if (!responseBody.isNullOrEmpty()) {
+                    val doc = Jsoup.parse(responseBody)
                     val chapterElements = doc.select("div#chapter-list > div[data-chapter-number]")
 
                     chapterElements.forEach { element ->
@@ -121,56 +121,8 @@ internal class Kiryuu(context: MangaLoaderContext) :
                         )
                     }
 
-                    // If we got chapters from page 1, try to load remaining pages via standard HTTP
-                    // This works because we've established the session through the WebView
+                    // Return all chapters from the intercepted response
                     if (chapters.isNotEmpty()) {
-                        var page = 2
-                        while (page <= 100) { // Safety limit
-                            try {
-                                val url = "https://${domain}/wp-admin/admin-ajax.php?manga_id=$mangaId&page=$page&action=chapter_list"
-                                val doc = webClient.httpGet(
-                                    url,
-                                    okhttp3.Headers.headersOf(
-                                        "hx-request", "true",
-                                        "hx-target", "chapter-list",
-                                        "hx-trigger", hxTrigger,
-                                        "Referer", mangaAbsoluteUrl,
-                                    )
-                                ).parseHtml()
-
-                                val moreChapters = doc.select("div#chapter-list > div[data-chapter-number]")
-                                if (moreChapters.isEmpty()) break
-
-                                moreChapters.forEach { element ->
-                                    val a = element.selectFirst("a") ?: return@forEach
-                                    val href = a.attrAsRelativeUrl("href")
-                                    if (href.isBlank()) return@forEach
-
-                                    val chapterTitle = element.selectFirst("div.font-medium span")?.text()?.trim() ?: ""
-                                    val dateText = element.selectFirst("time")?.text()
-                                    val number = element.attr("data-chapter-number").toFloatOrNull() ?: -1f
-
-                                    chapters.add(
-                                        MangaChapter(
-                                            id = generateUid(href),
-                                            title = chapterTitle,
-                                            url = href,
-                                            number = number,
-                                            volume = 0,
-                                            scanlator = null,
-                                            uploadDate = parseDate(dateText),
-                                            branch = null,
-                                            source = source,
-                                        ),
-                                    )
-                                }
-                                page++
-                            } catch (e: Exception) {
-                                // Stop on error
-                                break
-                            }
-                        }
-
                         return chapters.reversed()
                     }
                 }
