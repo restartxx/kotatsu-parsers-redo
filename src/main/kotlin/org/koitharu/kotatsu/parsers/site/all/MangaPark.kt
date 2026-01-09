@@ -301,7 +301,7 @@ internal class MangaPark(context: MangaLoaderContext) :
                 if (url.indexOf("//s") != -1 && url.indexOf(".") != -1){
                     var p = url.split("//")[1]
                     p = p.substring(p.indexOf("/"))
-                    url = "https://mangapark.net$p"
+                    url = "https://$domain$p"
                 }
 				if (url.contains(".jpg") || url.contains(".jpeg") || url.contains(".jfif") || url.contains(".pjpeg") ||
 					url.contains(".pjp") || url.contains(".png") || url.contains(".webp") || url.contains(".avif") ||
