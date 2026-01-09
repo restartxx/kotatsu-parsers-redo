@@ -1,5 +1,7 @@
 package org.koitharu.kotatsu.parsers.site.en
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import org.jsoup.nodes.Document
 import org.koitharu.kotatsu.parsers.MangaLoaderContext
@@ -227,6 +229,8 @@ internal class KdtScans(context: MangaLoaderContext) :
         )
     }
 
+    override suspend fun getRelatedManga(seed: Manga): List<Manga> = emptyList()
+
     override suspend fun getPages(chapter: MangaChapter): List<MangaPage> {
         val fullUrl = chapter.url.toAbsoluteUrl(domain)
         val doc = webClient.httpGet(fullUrl).parseHtml()
@@ -296,16 +300,42 @@ internal class KdtScans(context: MangaLoaderContext) :
 
         println("[KdtScans] Primary image URL: $primaryImageUrl")
 
-        // Extract base path and file extension from the first image URL
+        // Extract base path, filename, and extension from the first image URL
         // Example: https://cdn.asdasdhg.com/Returned%20from%20Another%20World/Chapter%202.1/1.webp
+        // Example: https://cdn.asdasdhg.com/Childhood%20Friend%20and%20Girlfriend/Chapter%206/Ch%206%20Credit%20Page.webp
         val lastSlashIndex = primaryImageUrl.lastIndexOf('/')
         val basePath = primaryImageUrl.substring(0, lastSlashIndex + 1)
         val fileName = primaryImageUrl.substring(lastSlashIndex + 1)
-        val extension = fileName.substring(fileName.lastIndexOf('.'))
+        val extensionIndex = fileName.lastIndexOf('.')
+        val extension = fileName.substring(extensionIndex)
+        val fileNameWithoutExt = fileName.substring(0, extensionIndex)
 
         println("[KdtScans] Base path: $basePath")
         println("[KdtScans] File name: $fileName")
         println("[KdtScans] Extension: $extension")
+        println("[KdtScans] File name without extension: $fileNameWithoutExt")
+
+        // Find the pattern to replace for sequential numbering
+        // Look for trailing digits or common patterns like "Page"
+        val numberPattern = Regex("""(\d+)$""")
+        val pagePattern = Regex("""(Page|page)$""", RegexOption.IGNORE_CASE)
+
+        val baseTemplate = when {
+            numberPattern.containsMatchIn(fileNameWithoutExt) -> {
+                // Replace trailing digits with placeholder
+                numberPattern.replace(fileNameWithoutExt, "{NUM}")
+            }
+            pagePattern.containsMatchIn(fileNameWithoutExt) -> {
+                // Replace "Page" with placeholder
+                pagePattern.replace(fileNameWithoutExt, "{NUM}")
+            }
+            else -> {
+                // No pattern found, append number
+                "$fileNameWithoutExt{NUM}"
+            }
+        }
+
+        println("[KdtScans] Base template: $baseTemplate")
 
         // Sequential image loading with 404 detection
         val pages = mutableListOf<MangaPage>()
@@ -316,44 +346,64 @@ internal class KdtScans(context: MangaLoaderContext) :
         println("[KdtScans] Starting sequential image loading...")
 
         while (imageIndex <= 500) {
-            val imageUrl = "$basePath$imageIndex$extension"
+            val imageFileName = baseTemplate.replace("{NUM}", imageIndex.toString())
+            val imageUrl = "$basePath$imageFileName$extension"
 
-            // Try to fetch the image
-            val response = webClient.httpHead(imageUrl)
-            val statusCode = response.code
+            try {
+                // Try to fetch the image
+                val response = webClient.httpHead(imageUrl)
+                val statusCode = response.code
 
-            if (statusCode == 404) {
-                consecutive404s++
-                println("[KdtScans] Image $imageIndex: 404 (consecutive: $consecutive404s)")
-                // Stop if we get too many consecutive 404s
-                if (consecutive404s >= maxConsecutive404s) {
-                    println("[KdtScans] Reached $maxConsecutive404s consecutive 404s, stopping")
-                    break
+                if (statusCode == 404) {
+                    consecutive404s++
+                    println("[KdtScans] Image $imageIndex: 404 (consecutive: $consecutive404s)")
+                    // Stop if we get too many consecutive 404s
+                    if (consecutive404s >= maxConsecutive404s) {
+                        println("[KdtScans] Reached $maxConsecutive404s consecutive 404s, stopping")
+                        break
+                    }
+                } else if (response.isSuccessful) {
+                    // Reset counter on successful response
+                    consecutive404s = 0
+                    println("[KdtScans] Image $imageIndex: SUCCESS ($statusCode)")
+                    pages.add(
+                        MangaPage(
+                            id = generateUid(imageUrl),
+                            url = imageUrl,
+                            preview = null,
+                            source = source,
+                        )
+                    )
+                } else {
+                    // For other errors (403, 500, etc), treat as potential image
+                    consecutive404s = 0
+                    println("[KdtScans] Image $imageIndex: Other status $statusCode (treating as valid)")
+                    pages.add(
+                        MangaPage(
+                            id = generateUid(imageUrl),
+                            url = imageUrl,
+                            preview = null,
+                            source = source,
+                        )
+                    )
                 }
-            } else if (response.isSuccessful) {
-                // Reset counter on successful response
-                consecutive404s = 0
-                println("[KdtScans] Image $imageIndex: SUCCESS ($statusCode)")
-                pages.add(
-                    MangaPage(
-                        id = generateUid(imageUrl),
-                        url = imageUrl,
-                        preview = null,
-                        source = source,
-                    )
-                )
-            } else {
-                // For other errors (403, 500, etc), treat as potential image
-                consecutive404s = 0
-                println("[KdtScans] Image $imageIndex: Other status $statusCode (treating as valid)")
-                pages.add(
-                    MangaPage(
-                        id = generateUid(imageUrl),
-                        url = imageUrl,
-                        preview = null,
-                        source = source,
-                    )
-                )
+            } catch (e: Exception) {
+                // Handle NotFoundException and other exceptions
+                if (e.message?.contains("404") == true || e.javaClass.simpleName.contains("NotFound")) {
+                    consecutive404s++
+                    println("[KdtScans] Image $imageIndex: 404 (Exception, consecutive: $consecutive404s)")
+                    if (consecutive404s >= maxConsecutive404s) {
+                        println("[KdtScans] Reached $maxConsecutive404s consecutive 404s, stopping")
+                        break
+                    }
+                } else {
+                    println("[KdtScans] Image $imageIndex: Exception - ${e.message}")
+                    consecutive404s++
+                    if (consecutive404s >= maxConsecutive404s) {
+                        println("[KdtScans] Reached $maxConsecutive404s consecutive errors, stopping")
+                        break
+                    }
+                }
             }
 
             imageIndex++

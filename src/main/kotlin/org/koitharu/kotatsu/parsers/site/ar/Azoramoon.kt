@@ -311,8 +311,8 @@ internal class Azoramoon(context: MangaLoaderContext) :
 			else -> null
 		}
 
-		// Extract description
-		val description = doc.selectFirst("div.text-sm.text-gray-600, div.description, p.summary")?.html()
+		// Extract description from meta tag
+		val description = doc.selectFirst("meta[name=description]")?.attr("content")
 
 		// Extract tags/genres
 		val tags = doc.select("a[href*='/series/?genres='], span.genre").mapNotNullToSet { element ->
@@ -343,32 +343,38 @@ internal class Azoramoon(context: MangaLoaderContext) :
 
 	private suspend fun loadChapters(mangaUrl: String): List<MangaChapter> {
 		val doc = webClient.httpGet(mangaUrl.toAbsoluteUrl(domain)).parseHtml()
-		val dateFormat = SimpleDateFormat("yyyy-MM-dd", sourceLocale)
 
-		return doc.select("div.mt-4.space-y-2 a[href*='/chapter/'], div.chapter-list a").mapChapters { i, a ->
+		// Select all chapter links
+		val chapterLinks = doc.select("a[href*='/chapter-']")
+		println("[Azoramoon] Found ${chapterLinks.size} chapter links")
+
+		return chapterLinks.mapChapters { i, a ->
 			val url = a.attrAsRelativeUrl("href")
-			val titleElement = a.selectFirst("span.font-semibold, span.chapter-title")
-			val title = titleElement?.text() ?: a.text().substringBefore("•").trim()
 
-			// Extract chapter number from title or URL
-			val chapterNumber = title.substringAfter("الفصل", "")
-				.substringAfter("Chapter", "")
-				.trim()
-				.split(" ")[0]
+			// Extract chapter number from URL (e.g., /series/back-to-spring/chapter-61 -> 61)
+			val chapterNumber = url.substringAfterLast("/chapter-")
+				.substringBefore("/")
 				.toFloatOrNull() ?: (i + 1f)
 
-			// Extract date
-			val dateElement = a.selectFirst("time, span.text-gray-500")
-			val dateText = dateElement?.attr("datetime") ?: dateElement?.text()
+			// Try to get chapter title from the div with title attribute or the span
+			val chapterTitle = a.selectFirst("div[title]")?.attr("title")
+				?: a.selectFirst("span.font-medium")?.text()
+				?: "الفصل $chapterNumber"
+
+			// Extract date from time element
+			val timeElement = a.selectFirst("time")
+			val dateText = timeElement?.attr("dateTime") ?: timeElement?.text()
+
+			println("[Azoramoon] Chapter: $chapterTitle (number: $chapterNumber, url: $url)")
 
 			MangaChapter(
 				id = generateUid(url),
-				title = title,
+				title = chapterTitle,
 				number = chapterNumber,
 				volume = 0,
 				url = url,
 				scanlator = null,
-				uploadDate = dateFormat.parseSafe(dateText),
+				uploadDate = 0, // Can't parse "8 days" format easily
 				branch = null,
 				source = source,
 			)
