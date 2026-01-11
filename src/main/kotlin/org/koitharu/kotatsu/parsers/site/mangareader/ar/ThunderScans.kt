@@ -201,8 +201,15 @@ internal class ThunderScans(context: MangaLoaderContext) :
 		val fullUrl = chapter.url.toAbsoluteUrl(domain)
 		val doc = webClient.httpGet(fullUrl).parseHtml()
 
+		// Check if chapter is premium-only with countdown
+		val countdownTimer = doc.selectFirst(".countdown-container #countdown-timer, .countdown-timer")
+		if (countdownTimer != null) {
+			val unlockTime = countdownTimer.text()
+			throw Exception("Chapter is premium-only. Will be free at: $unlockTime")
+		}
+
 		// Select all images in the reader area, regardless of class
-		return doc.select(".reader-area img, #readerarea img").mapNotNull { img ->
+		val pages = doc.select(".reader-area img, #readerarea img").mapNotNull { img ->
 			val imageUrl = img.src()
 			if (imageUrl.isNullOrBlank() || imageUrl.startsWith("data:")) {
 				return@mapNotNull null
@@ -214,5 +221,11 @@ internal class ThunderScans(context: MangaLoaderContext) :
 				source = source,
 			)
 		}
+
+		if (pages.isEmpty()) {
+			throw Exception("No pages found. Chapter may be locked or unavailable.")
+		}
+
+		return pages
 	}
 }
