@@ -361,16 +361,22 @@ internal class Azoramoon(context: MangaLoaderContext) :
 
 		// Try to extract images from JSON data in script tag
 		val scriptContent = doc.select("script:containsData(__next_f.push)").html()
+		println("[Azoramoon] Script content length: ${scriptContent.length}")
 
 		if (scriptContent.isNotEmpty()) {
 			// Find the "images": array in the JSON - use a more robust pattern
 			// The images array ends with ],"team" so we use that as our endpoint
 			val imagesMatch = Regex(""""images":\[(.*?)\],"team"""").find(scriptContent)
+			println("[Azoramoon] Regex match found: ${imagesMatch != null}")
+
 			if (imagesMatch != null) {
 				val imagesJson = "[${imagesMatch.groupValues[1]}]"
+				println("[Azoramoon] Extracted JSON length: ${imagesJson.length}")
+				println("[Azoramoon] First 500 chars: ${imagesJson.take(500)}")
 
 				try {
 					val imagesArray = JSONArray(imagesJson)
+					println("[Azoramoon] JSONArray parsed successfully, length: ${imagesArray.length()}")
 					val pages = mutableListOf<MangaPage>()
 
 					for (i in 0 until imagesArray.length()) {
@@ -390,12 +396,20 @@ internal class Azoramoon(context: MangaLoaderContext) :
 						}
 					}
 
+					println("[Azoramoon] Total pages extracted: ${pages.size}")
 					if (pages.isNotEmpty()) {
 						return pages.sortedBy { it.url }
 					}
 				} catch (e: Exception) {
+					println("[Azoramoon] JSON parsing failed: ${e.message}")
+					e.printStackTrace()
 					// If JSON parsing fails, fall back to HTML parsing
 				}
+			} else {
+				println("[Azoramoon] Regex match failed, trying to find images in script...")
+				// Debug: show a snippet of the script content
+				val snippet = scriptContent.take(1000)
+				println("[Azoramoon] Script snippet: $snippet")
 			}
 		}
 
