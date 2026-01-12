@@ -362,31 +362,28 @@ internal class Azoramoon(context: MangaLoaderContext) :
 		// Try to extract images from JSON data in script tag
 		// There are multiple script tags with __next_f.push, we need to find the one with images
 		val scripts = doc.select("script:containsData(__next_f.push)")
-		println("[Azoramoon] Found ${scripts.size} script tags with __next_f.push")
 
 		for ((index, script) in scripts.withIndex()) {
 			val scriptContent = script.html()
 
 			// Check if this script contains the images array
-			if (!scriptContent.contains("\"images\":")) {
+			// In the escaped JSON, it appears as \"images\":
+			if (!scriptContent.contains("\\\"images\\\"")) {
 				continue
 			}
 
-			println("[Azoramoon] Script $index contains 'images', length: ${scriptContent.length}")
-
 			// Find the "images": array in the JSON - use a more robust pattern
 			// The images array ends with ],"team" so we use that as our endpoint
-			val imagesMatch = Regex(""""images":\[(.*?)\],"team"""").find(scriptContent)
-			println("[Azoramoon] Regex match found in script $index: ${imagesMatch != null}")
+			// In escaped JSON, we need to match \\\"images\\\":\\[...\\],\\\"team\\\"
+			val imagesMatch = Regex("""\\\"images\\\":\\\[(.*?)\\\],\\\"team\\\"""").find(scriptContent)
 
 			if (imagesMatch != null) {
-				val imagesJson = "[${imagesMatch.groupValues[1]}]"
-				println("[Azoramoon] Extracted JSON length: ${imagesJson.length}")
-				println("[Azoramoon] First 500 chars: ${imagesJson.take(500)}")
+				// Unescape the JSON string (remove backslashes from escaped quotes, etc.)
+				val escapedJson = imagesMatch.groupValues[1]
+				val unescapedJson = "[${escapedJson.replace("\\\"", "\"")}]"
 
 				try {
-					val imagesArray = JSONArray(imagesJson)
-					println("[Azoramoon] JSONArray parsed successfully, length: ${imagesArray.length()}")
+					val imagesArray = JSONArray(unescapedJson)
 					val pages = mutableListOf<MangaPage>()
 
 					for (i in 0 until imagesArray.length()) {
@@ -406,13 +403,10 @@ internal class Azoramoon(context: MangaLoaderContext) :
 						}
 					}
 
-					println("[Azoramoon] Total pages extracted: ${pages.size}")
 					if (pages.isNotEmpty()) {
 						return pages.sortedBy { it.url }
 					}
 				} catch (e: Exception) {
-					println("[Azoramoon] JSON parsing failed: ${e.message}")
-					e.printStackTrace()
 					// Try next script tag
 				}
 			}
