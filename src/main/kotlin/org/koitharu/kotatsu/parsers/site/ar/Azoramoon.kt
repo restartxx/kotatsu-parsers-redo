@@ -360,14 +360,24 @@ internal class Azoramoon(context: MangaLoaderContext) :
 		val doc = webClient.httpGet(fullUrl).parseHtml()
 
 		// Try to extract images from JSON data in script tag
-		val scriptContent = doc.select("script:containsData(__next_f.push)").html()
-		println("[Azoramoon] Script content length: ${scriptContent.length}")
+		// There are multiple script tags with __next_f.push, we need to find the one with images
+		val scripts = doc.select("script:containsData(__next_f.push)")
+		println("[Azoramoon] Found ${scripts.size} script tags with __next_f.push")
 
-		if (scriptContent.isNotEmpty()) {
+		for ((index, script) in scripts.withIndex()) {
+			val scriptContent = script.html()
+
+			// Check if this script contains the images array
+			if (!scriptContent.contains("\"images\":")) {
+				continue
+			}
+
+			println("[Azoramoon] Script $index contains 'images', length: ${scriptContent.length}")
+
 			// Find the "images": array in the JSON - use a more robust pattern
 			// The images array ends with ],"team" so we use that as our endpoint
 			val imagesMatch = Regex(""""images":\[(.*?)\],"team"""").find(scriptContent)
-			println("[Azoramoon] Regex match found: ${imagesMatch != null}")
+			println("[Azoramoon] Regex match found in script $index: ${imagesMatch != null}")
 
 			if (imagesMatch != null) {
 				val imagesJson = "[${imagesMatch.groupValues[1]}]"
@@ -403,13 +413,8 @@ internal class Azoramoon(context: MangaLoaderContext) :
 				} catch (e: Exception) {
 					println("[Azoramoon] JSON parsing failed: ${e.message}")
 					e.printStackTrace()
-					// If JSON parsing fails, fall back to HTML parsing
+					// Try next script tag
 				}
-			} else {
-				println("[Azoramoon] Regex match failed, trying to find images in script...")
-				// Debug: show a snippet of the script content
-				val snippet = scriptContent.take(1000)
-				println("[Azoramoon] Script snippet: $snippet")
 			}
 		}
 
