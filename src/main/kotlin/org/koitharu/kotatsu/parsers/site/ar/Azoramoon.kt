@@ -363,8 +363,9 @@ internal class Azoramoon(context: MangaLoaderContext) :
 		val scriptContent = doc.select("script:containsData(__next_f.push)").html()
 
 		if (scriptContent.isNotEmpty()) {
-			// Find the "images": array in the JSON
-			val imagesMatch = Regex(""""images":\[(.*?)\]""").find(scriptContent)
+			// Find the "images": array in the JSON - use a more robust pattern
+			// The images array ends with ],"team" so we use that as our endpoint
+			val imagesMatch = Regex(""""images":\[(.*?)\],"team"""").find(scriptContent)
 			if (imagesMatch != null) {
 				val imagesJson = "[${imagesMatch.groupValues[1]}]"
 
