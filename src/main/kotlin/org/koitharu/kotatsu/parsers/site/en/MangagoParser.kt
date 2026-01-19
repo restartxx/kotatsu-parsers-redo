@@ -267,13 +267,19 @@ internal class MangagoParser(context: MangaLoaderContext) :
         val chapterMap = mutableMapOf<Float, MangaChapter>()
 
         for (chapter in this) {
-            val chapterNumber = extractChapterNumber(chapter.title) ?: chapter.number
+            val chapterNumber = if (chapter.title != null) {
+                extractChapterNumber(chapter.title) ?: chapter.number
+            } else {
+                chapter.number
+            }
 
             if (!chapterMap.containsKey(chapterNumber)) {
                 chapterMap[chapterNumber] = chapter
             } else {
                 val existing = chapterMap[chapterNumber]!!
-                val newHasMoreInfo = chapter.title.length > existing.title.length
+                val newTitle = chapter.title.orEmpty()
+                val existingTitle = existing.title.orEmpty()
+                val newHasMoreInfo = newTitle.length > existingTitle.length
 
                 if (newHasMoreInfo) {
                     chapterMap[chapterNumber] = chapter
