@@ -258,7 +258,40 @@ internal class MangagoParser(context: MangaLoaderContext) :
                     branch = null,
                     source = source,
                 )
-            }.reversed()
+            }
+            .reversed()
+            .filterDuplicateChapters()
+    }
+
+    private fun List<MangaChapter>.filterDuplicateChapters(): List<MangaChapter> {
+        val chapterMap = mutableMapOf<Float, MangaChapter>()
+
+        for (chapter in this) {
+            val chapterNumber = extractChapterNumber(chapter.title) ?: chapter.number
+
+            if (!chapterMap.containsKey(chapterNumber)) {
+                chapterMap[chapterNumber] = chapter
+            } else {
+                val existing = chapterMap[chapterNumber]!!
+                val newHasMoreInfo = chapter.title.length > existing.title.length
+
+                if (newHasMoreInfo) {
+                    chapterMap[chapterNumber] = chapter
+                }
+            }
+        }
+
+        return chapterMap.values.toList()
+    }
+
+    private fun extractChapterNumber(title: String): Float? {
+        return try {
+            val regex = Regex("""(?:ch\.?|chapter|vol\.?\s*\d+\s+ch\.?)\s*(\d+(?:\.\d+)?)""", RegexOption.IGNORE_CASE)
+            val match = regex.find(title)
+            match?.groupValues?.get(1)?.toFloat()
+        } catch (e: Exception) {
+            null
+        }
     }
 
     // Cache for deobfuscated JS to avoid re-fetching in getPageUrl
@@ -282,12 +315,21 @@ internal class MangagoParser(context: MangaLoaderContext) :
             val js = getDeobfuscatedJS(doc) ?: throw Exception("Could not get JS")
 
             return images.mapIndexed { index, imageUrl ->
+                if (imageUrl.isBlank()) {
+                    throw Exception("Decrypted image URL at index $index is blank")
+                }
+
                 val url = if (imageUrl.contains("cspiclink")) {
                     val descramblingKey = getDescramblingKey(js, imageUrl)
                     "$imageUrl#desckey=$descramblingKey&cols=$cols"
                 } else {
                     imageUrl
                 }
+
+                if (url.isBlank()) {
+                    throw Exception("Final image URL at index $index is blank after processing")
+                }
+
                 MangaPage(
                     id = generateUid("$fullUrl-$index"),
                     url = url,
@@ -304,7 +346,11 @@ internal class MangagoParser(context: MangaLoaderContext) :
         if (pageDropdown.isNotEmpty()) {
             val pagesCount = pageDropdown.select("li").size
             // Use doc.location() as base, similar to Mihon reference
-            val pageUrl = doc.location().removeSuffix("/").substringBeforeLast("-")
+            val location = doc.location()
+            if (location.isEmpty()) {
+                throw Exception("Could not determine document location for mobile mode")
+            }
+            val pageUrl = location.removeSuffix("/").substringBeforeLast("-")
             return (1..pagesCount).map { pageNum ->
                 MangaPage(
                     id = generateUid("$pageUrl-$pageNum"),
@@ -321,6 +367,9 @@ internal class MangagoParser(context: MangaLoaderContext) :
     override suspend fun getPageUrl(page: MangaPage): String {
         // If the URL doesn't end with / or contains fragment, it's likely already an image URL (or resolved)
         if (!page.url.endsWith("/") || page.url.contains("#desckey=")) {
+            if (page.url.isBlank()) {
+                throw Exception("Page URL is blank in getPageUrl")
+            }
             return page.url
         }
 
@@ -341,6 +390,10 @@ internal class MangagoParser(context: MangaLoaderContext) :
         }
 
         val imageUrl = images[pageNumber - 1]
+
+        if (imageUrl.isBlank()) {
+            throw Exception("Decrypted image URL at index ${pageNumber - 1} is blank")
+        }
 
         // Add fragment if needed
         if (imageUrl.contains("cspiclink")) {
@@ -379,7 +432,13 @@ internal class MangagoParser(context: MangaLoaderContext) :
         var imageList = String(decryptedBytes, Charsets.UTF_8).trimEnd('\u0000')
         imageList = unscrambleImageList(imageList, deobfChapterJs)
 
-        return imageList.split(",")
+        val images = imageList.split(",")
+
+        if (images.isEmpty() || images.all { it.isBlank() }) {
+            throw Exception("Decrypted image list is empty or contains only blank entries")
+        }
+
+        return images
     }
 
     private suspend fun getDeobfuscatedJS(doc: Document): String? {
@@ -531,7 +590,7 @@ internal class MangagoParser(context: MangaLoaderContext) :
             .replace("img.src", "url")
 
         if (imgkeys.isEmpty()) {
-            return ""
+            throw Exception("Failed to extract image key extraction code from chapter.js")
         }
 
         val js = """
@@ -543,7 +602,13 @@ internal class MangagoParser(context: MangaLoaderContext) :
             getDescramblingKey("$imageUrl");
         """.trimIndent()
 
-        return context.evaluateJs("https://$domain/", js, 10000L) ?: ""
+        val result = context.evaluateJs("https://$domain/", js, 10000L)
+
+        if (result.isNullOrEmpty()) {
+            throw Exception("Failed to evaluate JavaScript to get descrambling key. The image format or site structure may have changed.")
+        }
+
+        return result
     }
 
     private companion object {
