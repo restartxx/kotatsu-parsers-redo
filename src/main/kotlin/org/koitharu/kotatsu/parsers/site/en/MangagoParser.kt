@@ -313,7 +313,6 @@ internal class MangagoParser(context: MangaLoaderContext) :
         val imgsrcsScript = doc.selectFirst("script:containsData(imgsrcs)")?.html()
 
         if (imgsrcsScript != null) {
-            println("[MANGAGO] Found imgsrcs in main page, decrypting all images...")
             // We found the data, decrypt it once and return all image URLs
             val images = decryptImageList(doc, fullUrl)
             val cols = getColsFromDoc(doc) ?: ""
@@ -342,7 +341,6 @@ internal class MangagoParser(context: MangaLoaderContext) :
 
         // Fallback: Strict Mobile Mode (No script in main page)
         // We must generate page URLs and fetch each one later in getPageUrl
-        println("[MANGAGO] No imgsrcs in main page, assuming strict mobile mode.")
         val pageDropdown = doc.select("div.controls ul#dropdown-menu-page")
         if (pageDropdown.isNotEmpty()) {
             val pagesCount = pageDropdown.select("li").size
@@ -375,7 +373,6 @@ internal class MangagoParser(context: MangaLoaderContext) :
         }
 
         // It is an HTML page URL (Mobile mode). Fetch and resolve.
-        println("[MANGAGO] Resolving mobile page: ${page.url}")
         val doc = webClient.httpGet(page.url).parseHtml()
 
         // Extract page number from URL
@@ -431,18 +428,12 @@ internal class MangagoParser(context: MangaLoaderContext) :
         val decryptedBytes = cipher.doFinal(imgsrcs)
 
         var imageList = String(decryptedBytes, Charsets.UTF_8).trimEnd('\u0000')
-        println("[MANGAGO] Decrypted raw string (first 200 chars): ${imageList.take(200)}")
-        println("[MANGAGO] Decrypted string length: ${imageList.length}")
-        println("[MANGAGO] Number of commas in decrypted string: ${imageList.count { it == ',' }}")
 
         imageList = unscrambleImageList(imageList, deobfChapterJs)
 
-        val images = imageList.split(",")
+        return imageList.split(",")
             .map { it.trim() }
             .filter { it.isNotBlank() }
-
-        println("[MANGAGO] Decrypted ${images.size} images")
-        return images
     }
 
 
@@ -456,7 +447,6 @@ internal class MangagoParser(context: MangaLoaderContext) :
             return cached.first
         }
 
-        println("[MANGAGO] Fetching and deobfuscating chapter.js: $chapterJsUrl")
         val obfuscatedChapterJs = webClient.httpGet(chapterJsUrl).parseRaw()
         val deobf = deobfuscateSoJsonV4(obfuscatedChapterJs)
 
@@ -554,7 +544,6 @@ internal class MangagoParser(context: MangaLoaderContext) :
     private fun unscrambleImageList(imageList: String, js: String): String {
         var imgList = imageList
 
-        // Check if unscrambling is needed - only if key locations exist and characters at those positions are digits
         val keyLocations = KEY_LOCATION_REGEX.findAll(js)
             .map { it.groupValues[1].toInt() }
             .distinct()
@@ -562,41 +551,31 @@ internal class MangagoParser(context: MangaLoaderContext) :
             .toList()
 
         if (keyLocations.isEmpty()) {
-            println("[MANGAGO] Unscramble: no key locations found, returning as-is")
             return imgList
         }
 
-        println("[MANGAGO] Unscramble: found ${keyLocations.size} unique key locations")
-        println("[MANGAGO] Unscramble: original image list length = ${imgList.length}")
-        println("[MANGAGO] Unscramble: keyLocations = $keyLocations")
-        println("[MANGAGO] Unscramble: first 100 chars of original: ${imgList.take(100)}")
-
-        val unscrambleKey = keyLocations.mapNotNull { loc ->
-            if (loc < imgList.length) {
-                val char = imgList[loc]
-                println("[MANGAGO] Unscramble: position $loc = '$char' (code: ${char.code})")
-                char.code
-            } else {
-                println("[MANGAGO] Unscramble: position $loc is beyond string length ${imgList.length}")
-                null
+        // Try to extract the unscramble key by parsing characters at key locations as integers.
+        // If any character is NOT a digit, it means the image list is already unscrambled.
+        val unscrambleKey = try {
+            keyLocations.map { loc ->
+                if (loc >= imgList.length) {
+                    throw NumberFormatException("Position $loc is beyond string length")
+                }
+                // This will throw NumberFormatException if the character is not a digit
+                imgList[loc].toString().toInt()
             }
-        }.toList()
+        } catch (e: NumberFormatException) {
+            // Characters at key positions are not digits, meaning the list is already unscrambled
+            return imgList
+        }
 
-        println("[MANGAGO] Unscramble: extracted key = $unscrambleKey")
-
-        // Remove characters - need to account for index shifts as we remove characters
-        keyLocations.filter { it < imgList.length }.forEachIndexed { idx, loc ->
+        // Remove characters at key positions, accounting for index shifts
+        keyLocations.forEachIndexed { idx, loc ->
             imgList = imgList.removeRange((loc - idx)..(loc - idx))
         }
 
-        println("[MANGAGO] Unscramble: after removing chars, length = ${imgList.length}")
-        println("[MANGAGO] Unscramble: first 200 chars = ${imgList.take(200)}")
-        println("[MANGAGO] Unscramble: string before split: ${imgList.take(500)}")
-
         imgList = imgList.unscramble(unscrambleKey)
 
-        println("[MANGAGO] Unscramble: final length = ${imgList.length}")
-        println("[MANGAGO] Unscramble: string after unscramble before split: ${imgList.take(500)}")
         return imgList
     }
 
