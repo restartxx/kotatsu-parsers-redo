@@ -576,7 +576,8 @@ internal class MangagoParser(context: MangaLoaderContext) :
             if (loc < imgList.length) {
                 val char = imgList[loc]
                 val isDigit = char.isDigit()
-                println("[MANGAGO] Unscramble: position $loc = '$char' (digit: $isDigit)")
+                val charCode = char.code
+                println("[MANGAGO] Unscramble: position $loc = '$char' (code: $charCode, digit: $isDigit)")
             } else {
                 println("[MANGAGO] Unscramble: position $loc is beyond string length ${imgList.length}")
             }
@@ -589,6 +590,7 @@ internal class MangagoParser(context: MangaLoaderContext) :
 
         if (validKeyLocations.isEmpty()) {
             println("[MANGAGO] Unscramble: no valid digit keys at positions, returning as-is")
+            println("[MANGAGO] Unscramble: string before split: ${imgList.take(500)}")
             return imgList
         }
 
@@ -605,10 +607,12 @@ internal class MangagoParser(context: MangaLoaderContext) :
 
         println("[MANGAGO] Unscramble: after removing chars, length = ${imgList.length}")
         println("[MANGAGO] Unscramble: first 200 chars = ${imgList.take(200)}")
+        println("[MANGAGO] Unscramble: string before split: ${imgList.take(500)}")
 
         imgList = imgList.unscramble(unscrambleKey)
 
         println("[MANGAGO] Unscramble: final length = ${imgList.length}")
+        println("[MANGAGO] Unscramble: string after unscramble before split: ${imgList.take(500)}")
         return imgList
     }
 
