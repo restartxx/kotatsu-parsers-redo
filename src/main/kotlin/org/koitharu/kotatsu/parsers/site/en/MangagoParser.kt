@@ -321,10 +321,6 @@ internal class MangagoParser(context: MangaLoaderContext) :
             val js = getDeobfuscatedJS(doc) ?: throw Exception("Could not get JS")
 
             return images.mapIndexed { index, imageUrl ->
-                if (imageUrl.isBlank()) {
-                    throw Exception("Decrypted image URL at index $index is blank")
-                }
-
                 val url = if (imageUrl.contains("cspiclink")) {
                     val descramblingKey = getDescramblingKey(js, imageUrl)
                     "$imageUrl#desckey=$descramblingKey&cols=$cols"
@@ -439,11 +435,14 @@ internal class MangagoParser(context: MangaLoaderContext) :
         imageList = unscrambleImageList(imageList, deobfChapterJs)
 
         val images = imageList.split(",")
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
 
-        if (images.isEmpty() || images.all { it.isBlank() }) {
+        if (images.isEmpty()) {
             throw Exception("Decrypted image list is empty or contains only blank entries")
         }
 
+        println("[MANGAGO] Decrypted ${images.size} valid images from chapter")
         return images
     }
 
