@@ -426,12 +426,12 @@ internal class MangagoParser(context: MangaLoaderContext) :
         val key = findHexEncodedVariable(deobfChapterJs, "key").decodeHex()
         val iv = findHexEncodedVariable(deobfChapterJs, "iv").decodeHex()
 
-        val cipher = Cipher.getInstance("AES/CBC/NoPadding")
+        val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
         val keySpec = SecretKeySpec(key, "AES")
         cipher.init(Cipher.DECRYPT_MODE, keySpec, IvParameterSpec(iv))
         val decryptedBytes = cipher.doFinal(imgsrcs)
 
-        var imageList = String(decryptedBytes, Charsets.UTF_8).trimEnd('\u0000')
+        var imageList = String(decryptedBytes, Charsets.UTF_8).trimEnd('\u0000').trim()
         imageList = unscrambleImageList(imageList, deobfChapterJs)
 
         val images = imageList.split(",")
