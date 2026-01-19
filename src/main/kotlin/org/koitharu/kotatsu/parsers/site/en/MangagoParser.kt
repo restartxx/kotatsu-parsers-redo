@@ -309,11 +309,27 @@ internal class MangagoParser(context: MangaLoaderContext) :
         val fullUrl = chapter.url.toAbsoluteUrl(domain)
         val doc = webClient.httpGet(fullUrl).parseHtml()
 
-        // Attempt to find encrypted images immediately. This works for Desktop and Mobile (if data is present)
+        // Check for mobile mode FIRST (like Mihon does)
+        // Mobile mode has a page dropdown - each page is fetched separately
+        val pageDropdown = doc.select("div.controls ul#dropdown-menu-page")
+        if (pageDropdown.isNotEmpty()) {
+            val pagesCount = pageDropdown.select("li").size
+            // Use fullUrl as base since doc.location() may be empty
+            val pageUrl = fullUrl.removeSuffix("/").substringBeforeLast("-")
+            return (1..pagesCount).map { pageNum ->
+                MangaPage(
+                    id = generateUid("$pageUrl-$pageNum"),
+                    url = "$pageUrl-$pageNum/",
+                    preview = null,
+                    source = source,
+                )
+            }
+        }
+
+        // Desktop mode - all images are in imgsrcs, decrypt them all at once
         val imgsrcsScript = doc.selectFirst("script:containsData(imgsrcs)")?.html()
 
         if (imgsrcsScript != null) {
-            // We found the data, decrypt it once and return all image URLs
             val images = decryptImageList(doc, fullUrl)
             val cols = getColsFromDoc(doc) ?: ""
             val js = getDeobfuscatedJS(doc) ?: throw Exception("Could not get JS")
@@ -333,27 +349,6 @@ internal class MangagoParser(context: MangaLoaderContext) :
                 MangaPage(
                     id = generateUid("$fullUrl-$index"),
                     url = url,
-                    preview = null,
-                    source = source,
-                )
-            }
-        }
-
-        // Fallback: Strict Mobile Mode (No script in main page)
-        // We must generate page URLs and fetch each one later in getPageUrl
-        val pageDropdown = doc.select("div.controls ul#dropdown-menu-page")
-        if (pageDropdown.isNotEmpty()) {
-            val pagesCount = pageDropdown.select("li").size
-            // Use doc.location() as base, similar to Mihon reference
-            val location = doc.location()
-            if (location.isEmpty()) {
-                throw Exception("Could not determine document location for mobile mode")
-            }
-            val pageUrl = location.removeSuffix("/").substringBeforeLast("-")
-            return (1..pagesCount).map { pageNum ->
-                MangaPage(
-                    id = generateUid("$pageUrl-$pageNum"),
-                    url = "$pageUrl-$pageNum/",
                     preview = null,
                     source = source,
                 )
