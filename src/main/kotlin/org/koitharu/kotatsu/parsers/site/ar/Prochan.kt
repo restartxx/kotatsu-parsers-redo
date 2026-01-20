@@ -172,11 +172,7 @@ internal class Prochan(context: MangaLoaderContext) : PagedMangaParser(
 			val title = item.optString("title")
 			val chapterNum = chapterNumber.toFloatOrNull() ?: 0f
 
-			val chapterTitle = if (title.isNotBlank() && title != "null") {
-				title
-			} else {
-				"Chapter $chapterNumber"
-			}
+			val chapterTitle = title.takeIf { it.isNotBlank() && it != "null" }
 
 			val chapterUrl = "$mangaUrl/$chapterId/$chapterNumber"
 
@@ -194,42 +190,48 @@ internal class Prochan(context: MangaLoaderContext) : PagedMangaParser(
 		}
 	}
 
-	override suspend fun getPages(chapter: MangaChapter): List<MangaPage> {
-		val doc = webClient.httpGet(chapter.url.toAbsoluteUrl(domain)).parseHtml()
-		val scripts = doc.select("script:containsData(__next_f.push)")
+    override suspend fun getPages(chapter: MangaChapter): List<MangaPage> {
+        val doc = webClient.httpGet(chapter.url.toAbsoluteUrl(domain)).parseHtml()
+        val scripts = doc.select("script:containsData(__next_f.push)")
+        val regex = Regex("""\\?"appImages\\?"\s*:\s*(\[.+?\])""")
 
-		for (script in scripts) {
-			val content = script.data()
+        for (script in scripts) {
+            val content = script.data()
 
-			val appImagesMatch = Regex("\"appImages\"\\s*:\\s*(\\[[^\\]]*\\])").find(content)
-			if (appImagesMatch != null) {
-				return try {
-					val appImagesArrayStr = appImagesMatch.groupValues[1]
-					val appImagesArray = JSONArray(appImagesArrayStr)
+            val match = regex.find(content)
+            if (match != null) {
+                return try {
+                    // The captured string is likely inside a JS string literal, so it has escaped quotes (e.g., \")
+                    // We need to unescape them to make it valid JSON.
+                    val rawJson = match.groupValues[1]
+                    val cleanJson = rawJson.replace("\\\"", "\"")
 
-					appImagesArray.mapJSONNotNull { imageObj ->
-						if (imageObj is JSONObject) {
-							val desktopUrl = imageObj.optString("desktop")
-							if (desktopUrl.isNotBlank()) {
-								MangaPage(
-									id = generateUid(desktopUrl),
-									url = desktopUrl,
-									preview = null,
-									source = source,
-								)
-							} else {
-								null
-							}
-						} else {
-							null
-						}
-					}
-				} catch (e: Exception) {
-					emptyList()
-				}
-			}
-		}
+                    val appImagesArray = JSONArray(cleanJson)
 
-		return emptyList()
-	}
+                    appImagesArray.mapJSONNotNull { imageObj ->
+                        if (imageObj is JSONObject) {
+                            val desktopUrl = imageObj.optString("desktop")
+                            if (desktopUrl.isNotBlank()) {
+                                MangaPage(
+                                    id = generateUid(desktopUrl),
+                                    url = desktopUrl,
+                                    preview = null,
+                                    source = source,
+                                )
+                            } else {
+                                null
+                            }
+                        } else {
+                            null
+                        }
+                    }
+                } catch (e: Exception) {
+                    // If parsing fails for this specific script, continue to the next
+                    continue
+                }
+            }
+        }
+
+        return emptyList()
+    }
 }
