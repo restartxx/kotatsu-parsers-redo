@@ -459,6 +459,15 @@ internal class MangagoParser(context: MangaLoaderContext) :
         return imageList.split(",")
             .map { it.trim() }
             .filter { it.isNotBlank() }
+            .map { url ->
+                // Hostnames with underscores (e.g., iweb_5.mangapicgallery.com) cause SSL errors on Android
+                // Use HTTP instead to bypass the issue
+                if (url.startsWith("https://") && url.contains("/_") || url.contains("https://iweb_")) {
+                    url.replaceFirst("https://", "http://")
+                } else {
+                    url
+                }
+            }
     }
 
     private suspend fun getDeobfuscatedJS(doc: Document): String? {
