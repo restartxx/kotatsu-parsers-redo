@@ -316,14 +316,31 @@ internal class MangagoParser(context: MangaLoaderContext) :
             val pagesCount = pageDropdown.select("li").size
             println("[MANGAGO] getPages: Mobile mode detected, pagesCount=$pagesCount")
 
-            // Remove trailing slash and any existing page number from URL
-            val baseUrl = fullUrl.removeSuffix("/").let { url ->
-                val lastSegment = url.substringAfterLast("/")
-                if (lastSegment.toIntOrNull() != null) {
-                    url.substringBeforeLast("/")
-                } else {
-                    url
-                }
+            // Detect URL format and build batch URL generator
+            // Format 1: .../chapter/xxx/yyy/1/ -> .../chapter/xxx/yyy/6/
+            // Format 2: .../pg-1/ -> .../pg-6/
+            val cleanUrl = fullUrl.removeSuffix("/")
+            val lastSegment = cleanUrl.substringAfterLast("/")
+
+            val isPgFormat = lastSegment.startsWith("pg-")
+            val baseUrl: String
+            val buildBatchUrl: (Int) -> String
+
+            if (isPgFormat) {
+                // Format: .../pg-1/ -> extract base and use pg-N
+                baseUrl = cleanUrl.substringBeforeLast("/")
+                buildBatchUrl = { batchNum -> "$baseUrl/pg-$batchNum/" }
+                println("[MANGAGO] getPages: Using pg-N format, baseUrl=$baseUrl")
+            } else if (lastSegment.toIntOrNull() != null) {
+                // Format: .../1/ -> use /N/
+                baseUrl = cleanUrl.substringBeforeLast("/")
+                buildBatchUrl = { batchNum -> "$baseUrl/$batchNum/" }
+                println("[MANGAGO] getPages: Using /N/ format, baseUrl=$baseUrl")
+            } else {
+                // No page number in URL, append /N/
+                baseUrl = cleanUrl
+                buildBatchUrl = { batchNum -> "$baseUrl/$batchNum/" }
+                println("[MANGAGO] getPages: No page in URL, using /N/ format, baseUrl=$baseUrl")
             }
 
             // Mobile mode loads images in batches of 5
@@ -337,7 +354,7 @@ internal class MangagoParser(context: MangaLoaderContext) :
             val cols = getColsFromDoc(doc) ?: ""
 
             while (allImages.size < pagesCount) {
-                val batchUrl = "$baseUrl/$batchStart/"
+                val batchUrl = buildBatchUrl(batchStart)
                 println("[MANGAGO] getPages: Fetching batch at $batchUrl")
 
                 val batchDoc = if (batchStart == 1) doc else webClient.httpGet(batchUrl).parseHtml()
