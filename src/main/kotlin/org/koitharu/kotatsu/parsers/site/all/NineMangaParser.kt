@@ -186,7 +186,13 @@ internal abstract class NineMangaParser(
 
         val response = webClient.httpGet(url, headers)
         val doc = followJavaScriptRedirect(response, headers)
-        val finalUrl = response.request.url.toString()
+        var finalUrl = response.request.url.toString()
+
+        // Check if the final URL lacks the correct domain and reconstruct it
+        if (!finalUrl.contains(domain, ignoreCase = true)) {
+            val path = response.request.url.encodedPath
+            finalUrl = "https://$domain$path"
+        }
 
         // Try to extract images from JavaScript first (for redirected pages)
         val jsImageUrls = extractImagesFromJavaScript(doc)
