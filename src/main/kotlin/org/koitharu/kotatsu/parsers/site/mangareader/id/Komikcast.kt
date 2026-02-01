@@ -175,7 +175,6 @@ internal class Komikcast(context: MangaLoaderContext) :
 		return images.mapNotNull { entry ->
 			val imgUrl = entry.value
 			if (imgUrl.isNullOrEmpty()) return@mapNotNull null
-			if (imgUrl.isNullOrEmpty()) return@mapNotNull null
 			MangaPage(
 				id = generateUid(imgUrl),
 				url = if (imgUrl.startsWith("http")) imgUrl else imgUrl,
@@ -211,8 +210,7 @@ internal class Komikcast(context: MangaLoaderContext) :
 	private fun parseSeriesList(json: String): List<Manga> {
 		val result = mutableListOf<Manga>()
 		try {
-			val responseObj = org.json.JSONObject(json)
-			val dataArray = responseObj.getJSONObject("data").getJSONArray("data")
+			val dataArray = org.json.JSONArray(json)
 
 			for (i in 0 until dataArray.length()) {
 				val seriesObj = dataArray.getJSONObject(i)
@@ -260,7 +258,7 @@ internal class Komikcast(context: MangaLoaderContext) :
 							number = (chaptersArray.length() - j).toFloat(),
 							volume = 0,
 							scanlator = null,
-							uploadDate = parseChapterDate(chapterData.optString("createdAt")),
+							uploadDate = parseChapterDate(chapterObj.optString("createdAt")),
 							branch = null,
 							source = source,
 						)
@@ -279,7 +277,11 @@ internal class Komikcast(context: MangaLoaderContext) :
 
 	private fun parseSeriesJson(json: String): SeriesData {
 		val responseObj = org.json.JSONObject(json)
-		val dataObj = responseObj.getJSONObject("data").getJSONObject("data")
+		val dataObj = if (responseObj.has("data") && responseObj.getJSONObject("data").has("data")) {
+			responseObj.getJSONObject("data").getJSONObject("data")
+		} else {
+			responseObj.getJSONObject("data")
+		}
 
 		val genreIds = dataObj.getJSONArray("genreIds")
 		val genres = mutableListOf<GenreData>()
@@ -321,13 +323,18 @@ internal class Komikcast(context: MangaLoaderContext) :
 
 	private fun parseChapterDetailJson(json: String): ChapterDetailData {
 		val responseObj = org.json.JSONObject(json)
-		val dataObj = responseObj.getJSONObject("data").getJSONObject("data")
+		val dataObj = if (responseObj.has("data") && responseObj.getJSONObject("data").has("data")) {
+			responseObj.getJSONObject("data").getJSONObject("data")
+		} else {
+			responseObj.getJSONObject("data")
+		}
 
 		val imagesMap = mutableMapOf<String, String>()
 		if (dataObj.has("dataImages") && !dataObj.isNull("dataImages")) {
 			val imagesObj = dataObj.getJSONObject("dataImages")
 			val keys = imagesObj.keys()
-			for (key in keys) {
+			while (keys.hasNext()) {
+				val key = keys.next()
 				imagesMap[key] = imagesObj.getString(key)
 			}
 		}
