@@ -1,4 +1,4 @@
-package org.koitharu.kotatsu.parsers.local
+package org.koitharu.kotatsu.parsers.site.all
 
 import org.koitharu.kotatsu.parsers.MangaParser
 import org.koitharu.kotatsu.parsers.MangaSourceParser
