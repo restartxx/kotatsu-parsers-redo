@@ -1,29 +1,32 @@
 package org.koitharu.kotatsu.parsers.site.all
 
-import org.koitharu.kotatsu.parsers.MangaParser
-import org.koitharu.kotatsu.parsers.MangaSourceParser
-import org.koitharu.kotatsu.parsers.MangaLoaderContext
-import org.koitharu.kotatsu.parsers.model.*
+import androidx.annotation.Keep
 import org.json.JSONArray
 import okhttp3.Request
+import org.koitharu.kotatsu.parsers.MangaLoaderContext
+import org.koitharu.kotatsu.parsers.MangaParser
+import org.koitharu.kotatsu.parsers.MangaSourceParser
+import org.koitharu.kotatsu.parsers.model.*
 import java.util.concurrent.TimeUnit
+import kotlin.random.Random
 
-// 1. CLASSE BASE (Lógica)
-// Nota: Recebe o 'context' e repassa pro pai (MangaParser)
+// CLASSE BASE (Lógica Compartilhada)
 abstract class BaseHomeLabParser(
     context: MangaLoaderContext,
     private val myBaseUrl: String
 ) : MangaParser(context) {
 
-    // O Kotatsu exige definir um domínio padrão para configs
-    override val configKeyDomain = myBaseUrl
+    // SOBRESCREVENDO ID MANUALMENTE
+    // Como não passamos o Enum no super(), precisamos definir um ID fixo
+    // Usamos o hash da URL pra gerar um Long único e constante
+    override val id: Long = myBaseUrl.hashCode().toLong()
 
-    // Como estamos hardcodando o IP, usamos ele direto
+    override val configKeyDomain = myBaseUrl
     override val domain = myBaseUrl
 
     override val client = super.client.newBuilder()
         .connectTimeout(5, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
         .build()
 
     override suspend fun getList(offset: Int, query: String?): List<Manga> {
@@ -37,16 +40,16 @@ abstract class BaseHomeLabParser(
 
         for (i in 0 until json.length()) {
             val item = json.getJSONObject(i)
-            val id = item.getString("id")
+            val idStr = item.getString("id")
             
             if (!query.isNullOrBlank() && !item.getString("title").contains(query, true)) {
                 continue
             }
 
             list.add(Manga(
-                id = generateUid(id), // O README pede pra usar generateUid pra garantir ID único
+                id = generateUid(idStr), 
                 title = item.getString("title"),
-                url = "/api/chapters/$id", 
+                url = "/api/chapters/$idStr", 
                 publicUrl = "", 
                 coverUrl = item.optString("cover_url").takeIf { it.isNotEmpty() },
                 source = this
@@ -64,10 +67,11 @@ abstract class BaseHomeLabParser(
         for (i in 0 until json.length()) {
             val item = json.getJSONObject(i)
             val chapterId = item.getString("id")
+            // Truque da URL
             val pagesEndpoint = "/api/pages/${manga.url.removePrefix("/api/chapters/")}/$chapterId"
 
             chapters.add(MangaChapter(
-                id = generateUid(chapterId), // generateUid aqui também
+                id = generateUid(chapterId), 
                 title = item.getString("title"),
                 url = pagesEndpoint,
                 uploadDate = 0L,
@@ -103,19 +107,14 @@ abstract class BaseHomeLabParser(
     }
 }
 
-// 2. IMPLEMENTAÇÕES COM A ANOTAÇÃO MÁGICA
-// O parametro 'name' na anotação deve ser único e minúsculo (ex: homelab_local)
+// -----------------------------------------------------------
+// AS EXTENSÕES EM SI (CAMUFLAGEM TOTAL)
+// -----------------------------------------------------------
 
-@MangaSourceParser(
-    name = "homelab_local",
-    title = "HomeLab (Termux Local)",
-    language = Language.MULTI
-)
-class LocalhostParser(context: MangaLoaderContext) : BaseHomeLabParser(context, "http://127.0.0.1:8000")
+@Keep
+@MangaSourceParser("HOMELAB_LOCAL", "HomeLab (Termux)", type = ContentType.MANGA)
+internal class LocalhostParser(context: MangaLoaderContext) : BaseHomeLabParser(context, "http://127.0.0.1:8000")
 
-@MangaSourceParser(
-    name = "homelab_wireguard",
-    title = "HomeLab (Wireguard VM)",
-    language = Language.MULTI
-)
-class WireguardParser(context: MangaLoaderContext) : BaseHomeLabParser(context, "http://10.66.66.1:8000")
+@Keep
+@MangaSourceParser("HOMELAB_WIREGUARD", "HomeLab (Wireguard)", type = ContentType.MANGA)
+internal class WireguardParser(context: MangaLoaderContext) : BaseHomeLabParser(context, "http://10.66.66.1:8000")
