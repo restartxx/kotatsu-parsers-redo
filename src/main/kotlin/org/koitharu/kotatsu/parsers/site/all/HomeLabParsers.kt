@@ -1,31 +1,36 @@
 package org.koitharu.kotatsu.parsers.local
 
 import org.koitharu.kotatsu.parsers.MangaParser
+import org.koitharu.kotatsu.parsers.MangaSourceParser
+import org.koitharu.kotatsu.parsers.MangaLoaderContext
 import org.koitharu.kotatsu.parsers.model.*
 import org.json.JSONArray
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
 
-// 1. O CÉREBRO (Lógica compartilhada)
-abstract class BaseHomeLabParser : MangaParser {
+// 1. CLASSE BASE (Lógica)
+// Nota: Recebe o 'context' e repassa pro pai (MangaParser)
+abstract class BaseHomeLabParser(
+    context: MangaLoaderContext,
+    private val myBaseUrl: String
+) : MangaParser(context) {
 
-    // Configurações Padrão
-    override val language = Language.MULTI // Aparece em "Outros" ou "Multi"
-    override val isNsfwSource = true
-    
-    // Timeout agressivo pq é rede local (opcional, mas bom pra não travar se o PC tiver desligado)
+    // O Kotatsu exige definir um domínio padrão para configs
+    override val configKeyDomain = myBaseUrl
+
+    // Como estamos hardcodando o IP, usamos ele direto
+    override val domain = myBaseUrl
+
     override val client = super.client.newBuilder()
         .connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
 
-    // --- LISTAGEM (HOME) ---
     override suspend fun getList(offset: Int, query: String?): List<Manga> {
-        // A API Python deve retornar: [{"id": "PastaAutor", "title": "Autor", "cover_url": "http..."}, ...]
-        val request = Request.Builder().url("$baseUrl/api/list").build()
+        val request = Request.Builder().url("$domain/api/list").build()
         val response = client.newCall(request).execute()
         
-        if (!response.isSuccessful) throw Exception("Erro ao conectar no HomeLab: ${response.code}")
+        if (!response.isSuccessful) throw Exception("Erro HomeLab: ${response.code}")
 
         val json = JSONArray(response.body?.string())
         val list = mutableListOf<Manga>()
@@ -34,16 +39,15 @@ abstract class BaseHomeLabParser : MangaParser {
             val item = json.getJSONObject(i)
             val id = item.getString("id")
             
-            // Filtro de busca Client-Side (Já que a API retorna tudo)
             if (!query.isNullOrBlank() && !item.getString("title").contains(query, true)) {
                 continue
             }
 
             list.add(Manga(
-                id = id,
+                id = generateUid(id), // O README pede pra usar generateUid pra garantir ID único
                 title = item.getString("title"),
-                url = "/api/chapters/$id", // URL relativa para o getDetails
-                publicUrl = "", // Não tem link publico web
+                url = "/api/chapters/$id", 
+                publicUrl = "", 
                 coverUrl = item.optString("cover_url").takeIf { it.isNotEmpty() },
                 source = this
             ))
@@ -51,27 +55,22 @@ abstract class BaseHomeLabParser : MangaParser {
         return list
     }
 
-    // --- DETALHES (LISTA DE CAPÍTULOS/PASTAS) ---
     override suspend fun getDetails(manga: Manga): MangaDetails {
-        // A API retorna as subpastas (ex: 2026-01, 2026-02)
-        val request = Request.Builder().url("$baseUrl${manga.url}").build()
+        val request = Request.Builder().url("$domain${manga.url}").build()
         val response = client.newCall(request).execute()
         val json = JSONArray(response.body?.string())
 
         val chapters = mutableListOf<MangaChapter>()
         for (i in 0 until json.length()) {
             val item = json.getJSONObject(i)
-            val chapterId = item.getString("id") // "2026-01"
-            
-            // TRUQUE: Montamos a URL das páginas aqui para facilitar o próximo passo
-            // Formato esperado pelo Python: /api/pages/{mangaId}/{chapterId}
-            val pagesEndpoint = "/api/pages/${manga.id}/$chapterId"
+            val chapterId = item.getString("id")
+            val pagesEndpoint = "/api/pages/${manga.url.removePrefix("/api/chapters/")}/$chapterId"
 
             chapters.add(MangaChapter(
-                id = chapterId,
+                id = generateUid(chapterId), // generateUid aqui também
                 title = item.getString("title"),
-                url = pagesEndpoint, // <--- Guardamos a rota da API aqui
-                uploadDate = 0L, // Pode implementar parsing de data se quiser
+                url = pagesEndpoint,
+                uploadDate = 0L,
                 source = this,
                 scanlator = "HomeServer"
             ))
@@ -79,25 +78,21 @@ abstract class BaseHomeLabParser : MangaParser {
 
         return MangaDetails(
             title = manga.title,
-            description = "Hospedado em: $baseUrl\nCaminho: ${manga.id}",
+            description = "HomeLab em: $domain",
             chapters = chapters,
             coverUrl = manga.coverUrl
         )
     }
 
-    // --- LEITOR (IMAGENS) ---
     override suspend fun getPages(chapter: MangaChapter): List<MangaPage> {
-        // chapter.url já vem pronto do getDetails: "/api/pages/Autor/Capitulo"
-        val request = Request.Builder().url("$baseUrl${chapter.url}").build()
+        val request = Request.Builder().url("$domain${chapter.url}").build()
         val response = client.newCall(request).execute()
         val jsonArray = JSONArray(response.body?.string())
 
         val pages = mutableListOf<MangaPage>()
         for (i in 0 until jsonArray.length()) {
-            // A API Python deve retornar URLs absolutas ou relativas
-            // Se retornar absoluta (http://...), usa direto. Se relativa, concatena.
             val pagePath = jsonArray.getString(i)
-            val fullUrl = if (pagePath.startsWith("http")) pagePath else "$baseUrl$pagePath"
+            val fullUrl = if (pagePath.startsWith("http")) pagePath else "$domain$pagePath"
             
             pages.add(MangaPage(
                 url = fullUrl,
@@ -108,19 +103,19 @@ abstract class BaseHomeLabParser : MangaParser {
     }
 }
 
-// 2. AS IMPLEMENTAÇÕES CONCRETAS (Para aparecerem no menu)
+// 2. IMPLEMENTAÇÕES COM A ANOTAÇÃO MÁGICA
+// O parametro 'name' na anotação deve ser único e minúsculo (ex: homelab_local)
 
-class LocalhostParser : BaseHomeLabParser() {
-    override val name = "HomeLab (Termux/Local)"
-    override val baseUrl = "http://127.0.0.1:8000" // Porta da API Python
-    override val configKey = "homelab_local"
-    override val id = 9001L // ID único arbitrário
-}
+@MangaSourceParser(
+    name = "homelab_local",
+    title = "HomeLab (Termux Local)",
+    language = Language.MULTI
+)
+class LocalhostParser(context: MangaLoaderContext) : BaseHomeLabParser(context, "http://127.0.0.1:8000")
 
-class WireguardParser : BaseHomeLabParser() {
-    override val name = "HomeLab (Wireguard VM)"
-    override val baseUrl = "http://10.66.66.1:8000" // Porta da API Python
-    override val configKey = "homelab_wireguard"
-    override val id = 9002L // ID único arbitrário
-}
-
+@MangaSourceParser(
+    name = "homelab_wireguard",
+    title = "HomeLab (Wireguard VM)",
+    language = Language.MULTI
+)
+class WireguardParser(context: MangaLoaderContext) : BaseHomeLabParser(context, "http://10.66.66.1:8000")
